@@ -372,6 +372,9 @@ select.field-input { cursor: pointer; }
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
+  position: relative;
+  z-index: 6;
+  pointer-events: auto;
 }
 .earn-tab.active {
   background: white;
