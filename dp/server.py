@@ -1188,6 +1188,12 @@ def get_earnings():
         "SELECT * FROM orders WHERE partner_id=%s AND DATE(delivered_at)=%s AND status='done'", (pid, yesterday))
     yesterday_earn = sum(o["commission"] or 0 for o in orders_yesterday)
     yesterday_count = len(orders_yesterday)
+    # Yesterday's delivered/pending/transit counts
+    orders_yesterday_all = query(
+        "SELECT * FROM orders WHERE partner_id=%s AND DATE(created_at)=%s", (pid, yesterday))
+    yesterday_delivered   = len([o for o in orders_yesterday_all if o["status"] == "done"])
+    yesterday_pending     = len([o for o in orders_yesterday_all if o["status"] == "pending"])
+    yesterday_in_transit  = len([o for o in orders_yesterday_all if o["status"] == "picked"])
     
     # ALL-TIME totals (never resets — counts every order ever)
     total_delivered = query(
@@ -1218,15 +1224,21 @@ def get_earnings():
     return ok({
         "today":              today_earn,
         "today_count":        len(done_today),
-        "yesterday":          yesterday_earn,
-        "yesterday_count":    yesterday_count,
-        "delivered":          len(done_today),
-        "pending":            len(pending_today),
-        "in_transit":         len(in_transit_today),
+        "today_delivered":    len(done_today),
+        "today_pending":      len(pending_today),
+        "today_in_transit":   len(in_transit_today),
+
+        "yesterday":            yesterday_earn,
+        "yesterday_count":      yesterday_count,
+        "yesterday_delivered":  yesterday_delivered,
+        "yesterday_pending":    yesterday_pending,
+        "yesterday_in_transit": yesterday_in_transit,
+
         "total_delivered":    total_delivered,
         "total_pending":      total_pending,
         "total_in_transit":   total_in_transit,
         "total_earnings":     float(total_earnings),
+
         "week_earn":          float(week_earn),
         "week_est":           today_earn * 6,
         "month_est":          today_earn * 24,
