@@ -252,10 +252,10 @@ function renderHome() {
   ${renderLocationBar()}
 
   <div class="earnings-card">
-    <div style="display:flex;gap:6px;margin-bottom:12px">
-      <button onclick="setEarningsTab('today')" id="tab-today" class="earn-tab ${State.earningsTab==='today'?'active':''}">Today</button>
-      <button onclick="setEarningsTab('yesterday')" id="tab-yesterday" class="earn-tab ${State.earningsTab==='yesterday'?'active':''}">Yesterday</button>
-      <button onclick="setEarningsTab('all')" id="tab-all" class="earn-tab ${State.earningsTab==='all'?'active':''}">All-Time</button>
+    <div style="display:flex;gap:6px;margin-bottom:12px;position:relative;z-index:5">
+      <button type="button" onclick="setEarningsTab('today')" class="earn-tab ${State.earningsTab==='today'?'active':''}">Today</button>
+      <button type="button" onclick="setEarningsTab('yesterday')" class="earn-tab ${State.earningsTab==='yesterday'?'active':''}">Yesterday</button>
+      <button type="button" onclick="setEarningsTab('all')" class="earn-tab ${State.earningsTab==='all'?'active':''}">All-Time</button>
     </div>
     <div class="earnings-label" id="earnings-label">
       ${State.earningsTab==='today' ? "Today's Earnings" : State.earningsTab==='yesterday' ? "Yesterday's Earnings" : "All-Time Earnings"}
@@ -275,10 +275,25 @@ function renderHome() {
       }
     </div>
     <div class="earnings-stats">
-      <div class="stat-pill"><div class="val">${e.total_delivered || 0}</div><div class="lbl">Delivered</div></div>
-      <div class="stat-pill"><div class="val">${e.total_in_transit || 0}</div><div class="lbl">In Transit</div></div>
-      <div class="stat-pill"><div class="val">${e.total_pending || 0}</div><div class="lbl">Pending</div></div>
+      <div class="stat-pill"><div class="val">${
+        State.earningsTab==='today' ? (e.today_delivered||0) :
+        State.earningsTab==='yesterday' ? (e.yesterday_delivered||0) :
+        (e.total_delivered||0)
+      }</div><div class="lbl">Delivered</div></div>
+      <div class="stat-pill"><div class="val">${
+        State.earningsTab==='today' ? (e.today_in_transit||0) :
+        State.earningsTab==='yesterday' ? (e.yesterday_in_transit||0) :
+        (e.total_in_transit||0)
+      }</div><div class="lbl">In Transit</div></div>
+      <div class="stat-pill"><div class="val">${
+        State.earningsTab==='today' ? (e.today_pending||0) :
+        State.earningsTab==='yesterday' ? (e.yesterday_pending||0) :
+        (e.total_pending||0)
+      }</div><div class="lbl">Pending</div></div>
     </div>
+    <button class="qa-view-orders" onclick="openOrdersModal()" style="margin-top:14px;width:100%;background:rgba(255,255,255,0.15);border:none;color:white;padding:10px;border-radius:10px;font-family:var(--font);font-weight:700;font-size:13px;cursor:pointer">
+      📦 View All Orders
+    </button>
   </div>
 
   ${State.isOnline ? `
@@ -319,8 +334,11 @@ function renderHome() {
     </div>
   </div>
 
-  <div class="section-title">Recent Deliveries</div>
+  <div class="section-title">${State.isOnline ? 'New Orders' : 'Recent Deliveries'}</div>
   <div id="live-orders-list">${renderOrdersList()}</div>
+  <button class="qa-view-orders" onclick="openOrdersModal()" style="margin:8px 20px 0;width:calc(100% - 40px);background:var(--accent);border:none;color:white;padding:12px;border-radius:10px;font-family:var(--font);font-weight:700;font-size:13px;cursor:pointer">
+    📦 View All Orders
+  </button>
   <div class="spacer"></div>`;
 }
 
@@ -892,12 +910,34 @@ function openWithdrawModal() {
     <button class="btn-secondary" onclick="closeModal()">Cancel</button>
   `);
 }
+function openOrdersModal(tab = 'today') {
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0,10);
+  const yestStr  = new Date(now - 86400000).toISOString().slice(0,10);
 
-function openOrdersModal() {
-  const orders = State.orders;
-  modal('All Orders', orders.length === 0
-    ? `<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-title">No orders yet</div></div>`
-    : orders.map(o => `
+  let filtered = State.orders;
+  if (tab === 'today') {
+    filtered = State.orders.filter(o => (o.created_at || '').slice(0,10) === todayStr);
+  } else if (tab === 'yesterday') {
+    filtered = State.orders.filter(o => (o.created_at || '').slice(0,10) === yestStr);
+  }
+  // 'all' = no filter
+
+  const totalAmount = filtered.reduce((sum, o) => sum + (Number(o.order_amount || o.commission || 0)), 0);
+
+  const tabsHtml = `
+    <div style="display:flex;gap:6px;margin-bottom:16px">
+      <button type="button" onclick="openOrdersModal('today')" class="earn-tab" style="background:${tab==='today'?'var(--accent)':'var(--surface2)'};color:${tab==='today'?'white':'var(--muted)'}">Today</button>
+      <button type="button" onclick="openOrdersModal('yesterday')" class="earn-tab" style="background:${tab==='yesterday'?'var(--accent)':'var(--surface2)'};color:${tab==='yesterday'?'white':'var(--muted)'}">Yesterday</button>
+      <button type="button" onclick="openOrdersModal('all')" class="earn-tab" style="background:${tab==='all'?'var(--accent)':'var(--surface2)'};color:${tab==='all'?'white':'var(--muted)'}">All-Time</button>
+    </div>
+    <div style="text-align:center;margin-bottom:14px;font-size:13px;color:var(--muted)">
+      ${filtered.length} order(s) · Total ₹${fmt(totalAmount)}
+    </div>`;
+
+  const listHtml = filtered.length === 0
+    ? `<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-title">No orders</div></div>`
+    : filtered.map(o => `
     <div class="order-card" style="margin:0 0 10px">
       <div class="order-card-top">
         <div>
@@ -908,10 +948,12 @@ function openOrdersModal() {
         ${statusBadge(o.status)}
       </div>
       <div class="order-card-bottom">
-        <span class="order-earn">+₹${fmt(o.commission || 0)}</span>
+        <span class="order-earn">Price ₹${fmt(o.order_amount || 0)} · +₹${fmt(o.commission || 0)}</span>
         <span class="order-meta">${fmtDate(o.created_at)}</span>
       </div>
-    </div>`).join(''));
+    </div>`).join('');
+
+  modal('All Orders', tabsHtml + listHtml);
 }
 
 function openOrderDetail(orderId) {
