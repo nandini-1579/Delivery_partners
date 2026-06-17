@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+
+  <!-- ─── VIEWPORT: no zoom, fills device, respects notch ─── -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0,
+        maximum-scale=1.0, minimum-scale=1.0,
+        user-scalable=no, viewport-fit=cover" />
+
+  <title>LocalMart Hub – Delivery Partner</title>
+
+  <!-- ─── PWA / HOME SCREEN ──────────────────────────────── -->
+  <meta name="application-name"       content="LocalMart Hub" />
+  <meta name="apple-mobile-web-app-capable"           content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style"  content="black-translucent" />
+  <meta name="apple-mobile-web-app-title"             content="LMH Partner" />
+  <meta name="mobile-web-app-capable"                 content="yes" />
+
+  <!-- ─── THEME COLOR (browser chrome / status bar) ──────── -->
+  <meta name="theme-color" content="#2563eb" />
+  <!-- Dark mode override -->
+  <meta name="theme-color" content="#1e40af" media="(prefers-color-scheme: dark)" />
+
+  <!-- ─── SEO / SHARE ──────────────────────────────────────── -->
+  <meta name="description" content="LocalMart Hub Delivery Partner Portal – manage orders, track earnings, book shifts." />
+  <meta name="robots"      content="noindex, nofollow" />
+
+  <!-- ─── PREVENT PHONE-NUMBER DETECTION ──────────────────── -->
+  <meta name="format-detection" content="telephone=no, email=no, address=no" />
+
+  <!-- ─── FONTS ─────────────────────────────────────────────── -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap"
+        rel="stylesheet" />
+
+  <!-- ─── STYLES ─────────────────────────────────────────────── -->
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- ─── INLINE CRITICAL: prevent flash before CSS loads ──── -->
+  <style>
+    html, body { background: #f0f4ff; margin: 0; padding: 0; height: 100%; }
+    #app { display: flex; align-items: center; justify-content: center; height: 100dvh; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script src="app.js"></script>
+</body>
+</html>
