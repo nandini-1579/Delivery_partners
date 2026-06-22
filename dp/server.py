@@ -1065,85 +1065,32 @@ def _check_incentive_slabs(partner_id):
         _credit_reached_tiers(partner_id, slab["id"], rides_done, period_key)
 
 def _check_incentives(partner_id):
-    """Called after every delivery — check and credit incentives."""
+    """Only credit a ONE-TIME welcome bonus after the partner's first delivered order."""
     done_count = query(
         "SELECT COUNT(*) as c FROM orders WHERE partner_id=%s AND status='done'",
         (partner_id,), one=True)["c"]
 
-    milestones = query("SELECT * FROM incentives WHERE type='milestone' AND is_active=TRUE")
-    for inc in milestones:
-        if done_count >= inc["target_value"]:
-            already = query(
-                "SELECT * FROM partner_incentives WHERE partner_id=%s AND incentive_id=%s",
-                (partner_id, inc["id"]), one=True)
+    # Only act on the very first delivery
+    if done_count != 1:
+        return
 
-            if not already:
-                # First time hitting this milestone
-                execute("""INSERT INTO partner_incentives
-                           (partner_id,incentive_id,progress,achieved,achieved_at,paid)
-                           VALUES (%s,%s,%s,TRUE,CURRENT_TIMESTAMP,TRUE)""",
-                        (partner_id, inc["id"], inc["target_value"]))
-                amt = inc["reward_amount"]
-                if amt > 0:
-                    # Check no transaction already exists for this incentive
-                    exists = query(
-                        "SELECT id FROM wallet_transactions WHERE partner_id=%s AND reference=%s",
-                        (partner_id, f"INC-{inc['id']}"), one=True)
-                    if not exists:
-                        execute("UPDATE wallets SET balance=balance+%s, total_earned=total_earned+%s WHERE partner_id=%s",
-                                (amt, amt, partner_id))
-                        execute("""INSERT INTO wallet_transactions
-                                   (partner_id,label,amount,type,reference)
-                                   VALUES (%s,%s,%s,%s,%s)""",
-                                (partner_id, f"Bonus – {inc['title']}", amt, "bonus", f"INC-{inc['id']}"))
+    # Check welcome bonus not already given
+    already = query(
+        "SELECT id FROM wallet_transactions WHERE partner_id=%s AND reference=%s",
+        (partner_id, "WELCOME-BONUS"), one=True)
+    if already:
+        return
 
-            elif not already["achieved"]:
-                # Was tracked but not yet marked achieved
-                execute("""UPDATE partner_incentives
-                           SET progress=%s,achieved=TRUE,achieved_at=CURRENT_TIMESTAMP,paid=TRUE
-                           WHERE id=%s""",
-                        (done_count, already["id"]))
-                amt = inc["reward_amount"]
-                if amt > 0:
-                    # ✅ Check before inserting — prevents duplicates
-                    exists = query(
-                        "SELECT id FROM wallet_transactions WHERE partner_id=%s AND reference=%s",
-                        (partner_id, f"INC-{inc['id']}"), one=True)
-                    if not exists:
-                        execute("UPDATE wallets SET balance=balance+%s, total_earned=total_earned+%s WHERE partner_id=%s",
-                                (amt, amt, partner_id))
-                        execute("""INSERT INTO wallet_transactions
-                                   (partner_id,label,amount,type,reference)
-                                   VALUES (%s,%s,%s,%s,%s)""",
-                                (partner_id, f"Bonus – {inc['title']}", amt, "bonus", f"INC-{inc['id']}"))
-            else:
-                # Already achieved — just update progress count
-                execute("UPDATE partner_incentives SET progress=%s WHERE partner_id=%s AND incentive_id=%s",
-                        (done_count, partner_id, inc["id"]))
+    welcome = query("SELECT * FROM incentives WHERE title='Welcome Bonus'", one=True)
+    if not welcome:
+        return
 
-# ═══════════════════════════════════════════════════════════════
-#  REFERRALS
-# ═══════════════════════════════════════════════════════════════
-
-@app.route("/api/referrals", methods=["GET"])
-@require_auth
-def get_referrals():
-    pid   = g.partner_id
-    rows  = query(
-        """SELECT r.*, p.name AS referred_name, p.phone AS referred_phone,
-                  p.joined_date, p.rating
-           FROM referrals r
-           JOIN partners p ON r.referred_id = p.id
-           WHERE r.referrer_id=%s
-           ORDER BY r.created_at DESC""", (pid,))
-    total_earned = sum(r["referrer_bonus"] for r in rows if r["status"] == "paid")
-    return ok({
-        "referrals":     [dict(r) for r in rows],
-        "total_referrals": len(rows),
-        "qualified":     sum(1 for r in rows if r["status"] in ("qualified","paid")),
-        "total_earned":  total_earned,
-        "my_code":       query("SELECT referral_code FROM partners WHERE id=%s", (pid,), one=True)["referral_code"]
-    })
+    amt = welcome["reward_amount"]
+    execute("UPDATE wallets SET balance=balance+%s, total_earned=total_earned+%s WHERE partner_id=%s",
+            (amt, amt, partner_id))
+    execute("""INSERT INTO wallet_transactions (partner_id,label,amount,type,reference)
+               VALUES (%s,%s,%s,%s,%s)""",
+            (partner_id, "Bonus – Welcome Bonus", amt, "bonus", "WELCOME-BONUS"))
 
 
 @app.route("/api/referrals/qualify/<referred_id>", methods=["POST"])
@@ -1703,22 +1650,14 @@ def push_order_from_blazrlit():
 
     return jsonify({"ok": True})
 
+
 @app.route("/api/admin/clear-fake-transactions", methods=["POST"])
 def clear_fake_transactions():
     try:
-        # Remove duplicate incentives — keep only 1 of each title
-        execute("""
-            DELETE FROM incentives
-            WHERE id NOT IN (
-                SELECT MIN(id) FROM incentives
-                GROUP BY title
-            )
-        """)
-        # Wipe all transactions except commissions
-        execute("DELETE FROM wallet_transactions WHERE type != 'commission'")
-        # Reset partner_incentives
+        # Remove ALL bonus transactions except keep none — start fresh
+        execute("DELETE FROM wallet_transactions WHERE type = 'bonus'")
         execute("DELETE FROM partner_incentives")
-        # Recalculate wallet balance
+        # Recalculate wallet balance from remaining real transactions
         execute("""
             UPDATE wallets w
             SET balance = COALESCE((
@@ -1727,14 +1666,12 @@ def clear_fake_transactions():
             ), 0),
             total_earned = COALESCE((
                 SELECT SUM(amount) FROM wallet_transactions
-                WHERE partner_id = w.partner_id
-            ), 0),
-            total_withdrawn = 0
+                WHERE partner_id = w.partner_id AND amount > 0
+            ), 0)
         """)
-        return jsonify({"ok": True, "msg": "Done"})
+        return jsonify({"ok": True, "msg": "All bonuses cleared, balance recalculated"})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-    
+        return jsonify({"ok": False, "error": str(e)}), 500    
 
 # ─── RUN ──────────────────────────────────────────────────────
 if __name__ == "__main__":
