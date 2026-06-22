@@ -334,7 +334,7 @@ function renderHome() {
     </div>
   </div>
 
-  <div class="section-title">${State.isOnline ? 'New Orders' : 'Recent Deliveries'}</div>
+  <div class="section-title" id="orders-section-title">${State.isOnline ? 'New Orders' : 'Recent Deliveries'}</div>
   <div id="live-orders-list">${renderOrdersList()}</div>
   <button class="qa-view-orders" onclick="openOrdersModal()" style="margin:8px 20px 0;width:calc(100% - 40px);background:var(--accent);border:none;color:white;padding:12px;border-radius:10px;font-family:var(--font);font-weight:700;font-size:13px;cursor:pointer">
     📦 View All Orders
@@ -349,12 +349,20 @@ function setEarningsTab(tab) {
 
 /* ─── ORDERS LIST PARTIAL (used by renderHome + live polling) ── */
 function renderOrdersList() {
-  return State.orders.length === 0 ? `
-  <div class="empty-state">
-    <div class="empty-icon">📦</div>
-    <div class="empty-title">No orders yet</div>
-    <div class="empty-sub">Go online to start receiving orders in your zone</div>
-  </div>` : State.orders.slice(0, 3).map(o => `
+  const list = State.isOnline
+    ? State.orders.filter(o => o.status === 'pending' || o.status === 'picked')
+    : State.orders;
+
+  if (list.length === 0) {
+    return `
+    <div class="empty-state">
+      <div class="empty-icon">📦</div>
+      <div class="empty-title">${State.isOnline ? 'No new orders yet' : 'No orders yet'}</div>
+      <div class="empty-sub">${State.isOnline ? 'New orders will appear here automatically' : 'Go online to start receiving orders in your zone'}</div>
+    </div>`;
+  }
+
+  return list.slice(0, 5).map(o => `
   <div class="order-card" onclick="openOrderDetail('${o.id}')">
     <div class="order-card-top">
       <div>
@@ -365,7 +373,7 @@ function renderOrdersList() {
       ${statusBadge(o.status)}
     </div>
     <div class="order-card-bottom">
-      <span class="order-earn">+₹${fmt(o.commission || 0)}</span>
+      <span class="order-earn">Price ₹${fmt(o.order_amount || 0)} · +₹${fmt(o.commission || 0)}</span>
       <span class="order-meta">${Icons.location} ${Number(o.distance_km || 0).toFixed(1)} km</span>
     </div>
   </div>`).join('');
@@ -911,15 +919,18 @@ function openWithdrawModal() {
   `);
 }
 function openOrdersModal(tab = 'today') {
+  function localDateStr(d) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
   const now = new Date();
-  const todayStr = now.toISOString().slice(0,10);
-  const yestStr  = new Date(now - 86400000).toISOString().slice(0,10);
+  const todayStr = localDateStr(now);
+  const yestStr  = localDateStr(new Date(now.getTime() - 86400000));
 
   let filtered = State.orders;
   if (tab === 'today') {
-    filtered = State.orders.filter(o => (o.created_at || '').slice(0,10) === todayStr);
+    filtered = State.orders.filter(o => o.created_at && localDateStr(new Date(o.created_at)) === todayStr);
   } else if (tab === 'yesterday') {
-    filtered = State.orders.filter(o => (o.created_at || '').slice(0,10) === yestStr);
+  filtered = State.orders.filter(o => o.created_at && localDateStr(new Date(o.created_at)) === yestStr);
   }
   // 'all' = no filter
 
@@ -972,8 +983,14 @@ function openOrderDetail(orderId) {
           <span style="font-weight:800;font-size:15px;color:var(--green)">₹${fmt(o.commission)}</span>
         </div>
       </div>
-      ${o.status === 'pending' ? `<button class="btn-primary" onclick="updateOrderStatus('${o.id}','picked')">Mark as Picked Up</button>` : ''}
-      ${o.status === 'picked'  ? `<button class="btn-primary" onclick="updateOrderStatus('${o.id}','done')">Mark as Delivered ✓</button>` : ''}
+      ${State.isOnline ? `
+        ${o.status === 'pending' ? `<button class="btn-primary" onclick="updateOrderStatus('${o.id}','picked')">Mark as Picked Up</button>` : ''}
+        ${o.status === 'picked'  ? `<button class="btn-primary" onclick="updateOrderStatus('${o.id}','done')">Mark as Delivered ✓</button>` : ''}
+      ` : `
+        <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:12px;text-align:center;font-size:13px;color:#92400e;font-weight:600">
+          ⚠️ Go online to update order status
+        </div>
+      `}
       <button class="btn-secondary" onclick="closeModal()">Close</button>
     </div>`);
 }
@@ -1660,7 +1677,7 @@ function requestLocationPermission() {
       State.locationError = msgs[err.code] || 'Location error';
       refreshPage('home');
     },
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 }
   );
 }
 
@@ -1831,23 +1848,13 @@ async function updateOrderStatus(orderId, status) {
   if (!ok) return toast(data.error || 'Update failed', 'error');
   toast(data.message || 'Updated!', 'success');
 
-  // ✅ Update order in State immediately — no refresh needed
   const order = State.orders.find(o => o.id === orderId);
   if (order) order.status = status;
-
-  // ✅ Refresh earnings counts immediately from updated State
-  if (State.earnings) {
-    const orders = State.orders.filter(o => o.partner_id === State.partner?.id || o.status !== 'pending');
-    State.earnings.total_delivered  = State.orders.filter(o => o.status === 'done').length;
-    State.earnings.total_in_transit = State.orders.filter(o => o.status === 'picked').length;
-    State.earnings.total_pending    = State.orders.filter(o => o.status === 'pending').length;
-  }
+  recalcLocalCounts();   // ✅ confirm this line exists
 
   closeModal();
   refreshPage('home');
-
-  // Sync earnings from server in background
-  loadEarnings().then(() => refreshPage('home'));
+  loadEarnings().then(() => { recalcLocalCounts(); refreshPage('home'); });  // ✅ recalc again after server sync
 }
 async function saveProfile() {
   const name  = document.getElementById('p-name').value.trim();
@@ -1883,18 +1890,32 @@ async function saveEmergency() {
 
 /* ─── DATA LOADERS ──────────────────────────────────────────── */
 async function loadProfile()    { const { ok, data } = await api('GET', '/profile');    if (ok) State.partner = data.profile; }
+function localDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
 async function loadOrders() {
   const { ok, data } = await api('GET', '/orders');
   if (ok) {
     State.orders = data.orders || [];
-    // Update counts immediately after loading orders
-    if (State.earnings) {
-      State.earnings.total_delivered  = State.orders.filter(o => o.status === 'done').length;
-      State.earnings.total_in_transit = State.orders.filter(o => o.status === 'picked').length;
-      State.earnings.total_pending    = State.orders.filter(o => o.status === 'pending').length;
-    }
   }
 }
+
+function recalcLocalCounts() {
+  if (!State.earnings) State.earnings = {};
+  const todayStr = localDateStr(new Date());
+  const todayOrders = State.orders.filter(o => o.created_at && localDateStr(new Date(o.created_at)) === todayStr);
+
+  State.earnings.today_delivered   = todayOrders.filter(o => o.status === 'done').length;
+  State.earnings.today_pending     = todayOrders.filter(o => o.status === 'pending').length;
+  State.earnings.today_in_transit  = todayOrders.filter(o => o.status === 'picked').length;
+  State.earnings.today_count       = State.earnings.today_delivered;
+
+  State.earnings.total_delivered   = State.orders.filter(o => o.status === 'done').length;
+  State.earnings.total_pending     = State.orders.filter(o => o.status === 'pending').length;
+  State.earnings.total_in_transit  = State.orders.filter(o => o.status === 'picked').length;
+}
+
 async function loadEarnings()   { const { ok, data } = await api('GET', '/earnings');   if (ok) State.earnings = data; }
 async function loadWallet()     { const { ok, data } = await api('GET', '/wallet');     if (ok) { State.wallet = data; refreshPage('payouts'); } }
 async function loadIncentives() { const { ok, data } = await api('GET', '/incentives'); if (ok) State.incentives = data.incentives || []; }
@@ -1915,7 +1936,13 @@ async function loadTodayShift() {
     }
 }
 async function loadAll() {
-  await Promise.all([loadProfile(), loadOrders(), loadEarnings(), loadWallet(), loadIncentives(), loadIncentiveSlabs('daily'), loadIncentiveSlabs('weekly'), loadTodayShift(), loadReferrals(), loadReferralStatus()]);
+    await Promise.all([
+        loadProfile(), loadOrders(), loadEarnings(),
+        loadWallet(), loadIncentives(), loadReferrals(),
+        loadReferralStatus(),
+        loadTodayShift()
+    ]);
+    recalcLocalCounts();   // ✅ always correct counts right after any full load
 }
 // Silently fetches /api/earnings every 15s and patches the DOM in-place.
 // No full re-render — only the 4 changing numbers are touched.
@@ -2312,8 +2339,11 @@ function initApp() {
   window._orderPollInterval = setInterval(async () => {
     await loadOrders();
     await loadEarnings();
+    recalcLocalCounts();   // ✅ run AFTER loadEarnings so it overrides server's mismatched count
     refreshPage('home');
-  }, 15000);  // every 15 seconds
+    if (State.currentPage === 'payouts') refreshPage('payouts');
+  }, 8000); // poll every 8 seconds for faster updates
+  
   // Start auto-refresh for order counts (every 15s)
   startEarningsPolling();
   // Show referral status banner if referred partner
