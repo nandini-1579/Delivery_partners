@@ -1556,7 +1556,7 @@ def topup_initiate():
     if method not in ("upi", "card", "netbanking"):
         return err("Invalid payment method")
     ref      = "TUP-" + secrets.token_hex(5).upper()
-    upi_vpa  = "9491413357@ybl"
+    upi_vpa  = "7997443637-2@ybl"
     upi_link = f"upi://pay?pa={upi_vpa}&pn=LocalMartHub&am={amount:.2f}&tn=Wallet-{ref}&cu=INR"
     return ok({
         "reference": ref,
